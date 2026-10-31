@@ -363,6 +363,4 @@ The first embedding-model download is a one-time cold-start cost on CPU-only mac
 
 <div align="center">
 
-Built for the Express Analytics AI/ML Engineer Intern take-home assignment.
-
 </div>
