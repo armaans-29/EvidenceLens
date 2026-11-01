@@ -1175,14 +1175,7 @@ def run_streamlit() -> None:
     elif page == "Document Library":
         st.markdown("## Document Library")
         st.caption("Upload documentation or index a public documentation URL.")
-        if st.button("Index included sample corpus", type="secondary"):
-            try:
-                sample_response = api_post("/ingest/sample")
-                sample_response.raise_for_status()
-                st.success(sample_response.json())
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Sample corpus indexing failed: {exc}")
+
         uploaded = st.file_uploader("Choose documents", type=["pdf", "txt", "md", "markdown", "html", "htm"],
                                     accept_multiple_files=True)
         if uploaded and st.button("Upload and index", type="primary"):
@@ -1274,4 +1267,10 @@ if __name__ == "__main__":
         print(export_feedback_csv())
     else:
         run_streamlit()
+
+# For Fast API
+# python -m uvicorn apppp:api --host 127.0.0.1 --port 8000
+
+# For Streamlit
+# python -m streamlit run apppp.py
 
