@@ -2,7 +2,7 @@
 
 # 🔎 EvidenceLens
 
-### An evidence-grounded technical documentation assistant built on a self-corrective RAG workflow.
+### An evidence grounded technical documentation assistant built on a self-corrective RAG workflow.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-StateGraph-1C3C3C)
