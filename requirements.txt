@@ -9,6 +9,7 @@ beautifulsoup4
 pypdf
 pandas
 numpy
+httpx
 langchain-core
 langchain-text-splitters
 langchain-groq
