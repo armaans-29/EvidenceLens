@@ -13,6 +13,9 @@
 
 **Ask a technical question → inspect the evidence → trust only what can be verified.**
 
+**Some glimpse of the User Interface, the smooth polished simple yet professional theme**
+
+
 </div>
 
 ---
