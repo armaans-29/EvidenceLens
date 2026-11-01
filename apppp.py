@@ -32,7 +32,6 @@ import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -1017,8 +1016,6 @@ def stats_endpoint():
 @api.get("/sessions/{session_id}")
 def session_endpoint(session_id: str):
     return {"session_id": session_id, "messages": get_history(session_id, limit=50)}
-# Internal FastAPI client for Streamlit deployment
-api_client = TestClient(api)
 
 
 # ---------------------------------------------------------------------------
@@ -1074,13 +1071,10 @@ def run_streamlit() -> None:
         st.caption(f"Session: `{st.session_state.session_id[:8]}`")
 
     def api_get(path: str):
-        return api_client.get(path, timeout=10)
+        return requests.get(f"{API_BASE_URL}{path}", timeout=10)
 
     def api_post(path: str, **kwargs):
-        return api_client.post(path, timeout=180, **kwargs)
-
-    def api_delete(path: str):
-        return api_client.delete(path, timeout=30)
+        return requests.post(f"{API_BASE_URL}{path}", timeout=180, **kwargs)
 
     if page == "Ask EvidenceLens":
         st.markdown("""
@@ -1225,7 +1219,7 @@ def run_streamlit() -> None:
                     left.caption(f"{doc['source_type']} · {doc['chunk_count']} chunks · Updated {doc['updated_at'][:19]}")
                     with right:
                         if st.button("Delete", key=f"del_{doc['document_id']}"):
-                            deleted = api_delete(f"/documents/{doc['document_id']}")
+                            deleted = requests.delete(f"{API_BASE_URL}/documents/{doc['document_id']}", timeout=30)
                             if deleted.ok:
                                 st.success("Document removed.")
                                 st.rerun()
