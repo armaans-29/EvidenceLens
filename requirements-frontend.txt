@@ -1,4 +1,4 @@
-# EvidenceLens FRONTEND dependencies (frontend.py)
+# EvidenceLens FRONTEND dependencies (for frontend.py)
 
 streamlit>=1.30
 requests>=2.31
