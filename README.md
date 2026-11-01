@@ -17,12 +17,12 @@
 
 ## Some glimpse of the User Interface, the smooth polished simple yet professional theme
 <p align="center">
-  <img src="images/1.png" width="50%">
-  <img src="images/2.png" width="50%">
-  <img src="images/3.png" width="50%">
-  <img src="images/4.png" width="50%">
-  <img src="images/5.png" width="50%">
-  <img src="images/6.png" width="50%">
+  <img src="images/1.png" width="32%">
+  <img src="images/2.png" width="32%">
+  <img src="images/3.png" width="32%">
+  <img src="images/4.png" width="32%">
+  <img src="images/5.png" width="32%">
+  <img src="images/6.png" width="32%">
 </p>
 
 ---
