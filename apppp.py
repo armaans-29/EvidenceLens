@@ -1176,20 +1176,33 @@ def run_streamlit() -> None:
         st.markdown("## Document Library")
         st.caption("Upload documentation or index a public documentation URL.")
 
-        uploaded = st.file_uploader("Choose documents", type=["pdf", "txt", "md", "markdown", "html", "htm"],
-                                    accept_multiple_files=True)
+        uploaded = st.file_uploader(
+            "Choose documents",
+            type=["pdf", "txt", "md", "markdown", "html", "htm"],
+            accept_multiple_files=True
+        )
+
         if uploaded and st.button("Upload and index", type="primary"):
             progress = st.progress(0)
+
             for i, file in enumerate(uploaded):
                 try:
-                    response = api_post("/ingest", files={"file": (file.name, file.getvalue(), file.type)})
+                    response = api_post(
+                        "/ingest",
+                        files={"file": (file.name, file.getvalue(), file.type)}
+                    )
                     response.raise_for_status()
                     data = response.json()
-                    st.success(f"{data['name']}: {data['chunks']} chunks ({data['status']})")
+                    st.success(
+                        f"{data['name']}: {data['chunks']} chunks ({data['status']})"
+                    )
                 except Exception as exc:
                     st.error(f"{file.name}: {exc}")
+
                 progress.progress((i + 1) / len(uploaded))
+
         url = st.text_input("Or ingest a public documentation URL")
+
         if st.button("Index URL"):
             if not url.strip():
                 st.warning("Enter a URL first.")
@@ -1200,24 +1213,36 @@ def run_streamlit() -> None:
                     st.success(response.json())
                 except Exception as exc:
                     st.error(f"URL ingestion failed: {exc}")
+
         st.divider()
+
         try:
             documents = api_get("/documents").json().get("documents", [])
+
             if not documents:
                 st.info("No documents indexed yet.")
+
             for doc in documents:
                 with st.container(border=True):
                     left, right = st.columns([5, 1])
                     left.markdown(f"**{doc['name']}**")
-                    left.caption(f"{doc['source_type']} · {doc['chunk_count']} chunks · Updated {doc['updated_at'][:19]}")
+                    left.caption(
+                        f"{doc['source_type']} · {doc['chunk_count']} chunks · "
+                        f"Updated {doc['updated_at'][:19]}"
+                    )
+
                     with right:
                         if st.button("Delete", key=f"del_{doc['document_id']}"):
-                            deleted = requests.delete(f"{API_BASE_URL}/documents/{doc['document_id']}", timeout=30)
+                            deleted = requests.delete(
+                                f"{API_BASE_URL}/documents/{doc['document_id']}",
+                                timeout=30
+                            )
                             if deleted.ok:
                                 st.success("Document removed.")
                                 st.rerun()
                             else:
                                 st.error("Could not remove document.")
+
         except Exception:
             st.warning("FastAPI backend is not running.")
 
@@ -1273,4 +1298,3 @@ if __name__ == "__main__":
 
 # For Streamlit
 # python -m streamlit run apppp.py
-
