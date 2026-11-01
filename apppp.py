@@ -1,3 +1,4 @@
+
 """
 EvidenceLens: Self-Corrective RAG Documentation Intelligence
 Single-file application: FastAPI backend + Streamlit frontend + LangGraph workflow.
@@ -31,6 +32,7 @@ import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -628,61 +630,6 @@ Evidence:
                 "summary": f"Verification unavailable: {type(exc).__name__}"}
 
 
-def generate_conversational_response(question: str, history: list[dict[str, str]],
-                                     document_scope: bool) -> str:
-    """Answer conversationally when document evidence is unavailable.
-
-    In document mode, clearly separate general knowledge from indexed-document
-    evidence. This path never creates document citations or claims verification.
-    """
-    recent = "\n".join(
-        f'{m.get("role", "user")}: {str(m.get("content", ""))[:900]}'
-        for m in history[-8:]
-    ) or "No previous conversation."
-    if document_scope:
-        scope_rules = """The user has an indexed technical-document library, but retrieval did not find
-sufficient relevant evidence for this question.
-- Do NOT claim that the indexed documents say or prove anything about the answer.
-- Do NOT invent citations, document names, page numbers, or quotations.
-- Be a natural, helpful conversational assistant. If the question is answerable from
-  general knowledge, answer it directly and label it clearly as general knowledge,
-  outside the indexed documents.
-- If the question is ambiguous (for example, 'Who is this about?' without a clear
-  person, passage, or earlier referent), do not guess a name. Briefly explain what is
-  unclear and ask one focused clarification question.
-- If the user is asking about a document but the relevant passage was not retrieved,
-  say that the current search did not locate it and ask for the document/passage or
-  a more specific clue. Offer a useful next step, not a dead-end refusal.
-- Keep the tone warm, intelligent, concise, and interactive. Avoid boilerplate refusals."""
-        mode = "DOCUMENT-AWARE CONVERSATION: indexed documents exist, but no sufficient matching evidence was retrieved."
-    else:
-        scope_rules = """No documents have been indexed. Act as a capable general-purpose conversational
-assistant and answer using your general knowledge. Do not tell the user to upload a
-file unless the user specifically asks about document-grounded analysis. Do not invent
-sources or pretend that an answer is document-grounded. If a question is ambiguous,
-ask a concise clarification question rather than guessing."""
-        mode = "GENERAL CONVERSATION: the document library is currently empty."
-    prompt = f"""You are EvidenceLens, an intelligent and approachable AI assistant.
-{mode}
-
-Behavior rules:
-{scope_rules}
-- Resolve references such as 'he', 'she', 'this', 'that', and 'the previous one' from
-  the conversation history when the referent is genuinely clear.
-- If the referent is not clear, ask naturally instead of fabricating context.
-- Explain technical concepts simply when useful, but retain correct terminology.
-- Never state that an answer is verified against documents on this fallback path.
-
-Recent conversation:
-{recent}
-
-Current user message:
-{question}
-
-Respond directly to the user. Do not output JSON or internal workflow details."""
-    return invoke_text(prompt)
-
-
 # ---------------------------------------------------------------------------
 # LangGraph StateGraph workflow
 # ---------------------------------------------------------------------------
@@ -704,7 +651,6 @@ class RAGState(TypedDict, total=False):
     revision_count: int
     trace: dict[str, Any]
     final_status: str
-    document_scope: bool
 
 
 def build_graph():
@@ -750,9 +696,7 @@ def build_graph():
         return {"web_results": results}
 
     def route_after_web(state: RAGState) -> str:
-        # If neither indexed documents nor optional web search found evidence,
-        # continue the conversation without pretending the answer is grounded.
-        return "generate" if state.get("web_results") else "converse"
+        return "generate" if state.get("web_results") else "abstain"
 
     def generate_node(state: RAGState) -> dict[str, Any]:
         answer, status = generate_answer(
@@ -798,20 +742,15 @@ Evidence:
                       "Please consult the cited documentation directly.")
         return {"answer": answer, "revision_count": state.get("revision_count", 0) + 1}
 
-    def converse_node(state: RAGState) -> dict[str, Any]:
-        answer = generate_conversational_response(
-            state["question"], state.get("history", []), document_scope=True
-        )
+    def abstain_node(state: RAGState) -> dict[str, Any]:
         return {
-            "answer": answer,
-            "evidence_status": "OUTSIDE_DOCUMENT_SCOPE",
-            "verification": {
-                "verified": None,
-                "evidence_status": "OUTSIDE_DOCUMENT_SCOPE",
-                "unsupported_claims": [],
-                "summary": ("No sufficient matching indexed-document evidence was found. "
-                            "This is a general conversational response, not a document-verified answer."),
-            },
+            "answer": ("I could not find sufficient relevant evidence in the indexed documents"
+                       + (" or the configured web sources" if ENABLE_WEB_SEARCH else "")
+                       + ". I don't want to guess. Try adding the relevant technical documentation "
+                         "or asking a narrower question."),
+            "evidence_status": "INSUFFICIENT_EVIDENCE",
+            "verification": {"verified": False, "unsupported_claims": [],
+                             "summary": "Abstained because no sufficient evidence was found."},
         }
 
     def finish_node(state: RAGState) -> dict[str, Any]:
@@ -826,7 +765,7 @@ Evidence:
     graph.add_node("generate", generate_node)
     graph.add_node("verify", verify_node)
     graph.add_node("revise", revise_node)
-    graph.add_node("converse", converse_node)
+    graph.add_node("abstain", abstain_node)
     graph.add_node("finish", finish_node)
 
     graph.add_edge(START, "analyze")
@@ -837,14 +776,14 @@ Evidence:
     })
     graph.add_edge("rewrite", "retrieve")
     graph.add_conditional_edges("web_search", route_after_web, {
-        "generate": "generate", "converse": "converse"
+        "generate": "generate", "abstain": "abstain"
     })
-    graph.add_edge("converse", "finish")
     graph.add_edge("generate", "verify")
     graph.add_conditional_edges("verify", route_after_verify, {
         "finish": "finish", "revise": "revise"
     })
     graph.add_edge("revise", "verify")
+    graph.add_edge("abstain", "finish")
     graph.add_edge("finish", END)
     return graph.compile()
 
@@ -888,34 +827,18 @@ def run_question(question: str, session_id: Optional[str] = None) -> dict[str, A
     with db_connection() as conn:
         indexed_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     if indexed_count == 0:
-        # Empty-library mode is a real conversation, not a forced upload prompt.
-        try:
-            answer = generate_conversational_response(question, history, document_scope=False)
-            status = "GENERAL_CONVERSATION"
-            verification = {
-                "verified": None,
-                "evidence_status": status,
-                "unsupported_claims": [],
-                "summary": "No documents were indexed. This answer uses general model knowledge and is not document-grounded.",
-            }
-        except Exception as exc:
-            logger.exception("General conversation failed")
-            answer = ("I’m ready to help with that. I couldn't reach the language model just now. "
-                      "Please check the Groq API key and model configuration, then try again.")
-            status = "GENERAL_CONVERSATION_UNAVAILABLE"
-            verification = {"verified": None, "evidence_status": status,
-                            "unsupported_claims": [], "summary": type(exc).__name__}
+        answer = ("No documents have been indexed yet. Open Document Library, upload a PDF/MD/TXT/HTML file, "
+                  "or index the included sample corpus, then ask your question again.")
         save_message(session_id, "user", question)
         save_message(session_id, "assistant", answer)
         return {
             "question": question, "answer": answer,
-            "evidence_status": status, "citations": [],
-            "verification": verification,
+            "evidence_status": "INSUFFICIENT_EVIDENCE", "citations": [],
+            "verification": {"verified": False, "evidence_status": "INSUFFICIENT_EVIDENCE",
+                             "unsupported_claims": [], "summary": "The document library is empty."},
             "session_id": session_id,
-            "trace": {"mode": "general_conversation", "indexed_documents": 0,
-                      "retrieved_chunks": 0, "relevant_chunks": 0, "retry_attempts": 0,
-                      "web_fallback_used": False, "retrieval_seconds": 0.0,
-                      "total_seconds": round(time.perf_counter() - started, 3)},
+            "trace": {"retrieved_chunks": 0, "relevant_chunks": 0, "retry_attempts": 0,
+                      "retrieval_seconds": 0.0, "total_seconds": round(time.perf_counter() - started, 3)},
             "retrieved_evidence": [],
         }
     initial: RAGState = {
@@ -931,9 +854,6 @@ def run_question(question: str, session_id: Optional[str] = None) -> dict[str, A
     save_message(session_id, "assistant", answer)
     graded = state.get("graded", [])
     trace = {
-        "mode": ("document_grounded" if state.get("relevant") or state.get("web_results")
-                 else "document_aware_conversation"),
-        "indexed_documents": indexed_count,
         "rewritten_query": state.get("rewritten_query", question),
         "query_type": state.get("query_type", "other"),
         "retrieved_chunks": len(state.get("retrieved", [])),
@@ -966,7 +886,7 @@ def run_question(question: str, session_id: Optional[str] = None) -> dict[str, A
 api = FastAPI(
     title="EvidenceLens API",
     description="Self-corrective, evidence-grounded technical documentation assistant.",
-    version="1.2.0",
+    version="1.1.0",
 )
 api.add_middleware(
     CORSMiddleware,
@@ -1097,6 +1017,8 @@ def stats_endpoint():
 @api.get("/sessions/{session_id}")
 def session_endpoint(session_id: str):
     return {"session_id": session_id, "messages": get_history(session_id, limit=50)}
+# Internal FastAPI client for Streamlit deployment
+api_client = TestClient(api)
 
 
 # ---------------------------------------------------------------------------
@@ -1152,16 +1074,19 @@ def run_streamlit() -> None:
         st.caption(f"Session: `{st.session_state.session_id[:8]}`")
 
     def api_get(path: str):
-        return requests.get(f"{API_BASE_URL}{path}", timeout=10)
+        return api_client.get(path, timeout=10)
 
     def api_post(path: str, **kwargs):
-        return requests.post(f"{API_BASE_URL}{path}", timeout=180, **kwargs)
+        return api_client.post(path, timeout=180, **kwargs)
+
+    def api_delete(path: str):
+        return api_client.delete(path, timeout=30)
 
     if page == "Ask EvidenceLens":
         st.markdown("""
         <div class="hero">
           <div class="brand">EvidenceLens</div>
-          <div class="sub">Ask freely. Explore your documents. See what the evidence actually supports.</div>
+          <div class="sub">Ask technical questions. Inspect the evidence. Trust what can be verified.</div>
         </div>
         """, unsafe_allow_html=True)
         try:
@@ -1179,17 +1104,11 @@ def run_streamlit() -> None:
                 st.markdown(msg["content"])
                 if msg.get("result"):
                     result = msg["result"]
-                    prior_status = result.get("evidence_status")
-                    if prior_status == "GENERAL_CONVERSATION":
-                        st.caption("Mode: General conversation · Not document-grounded")
-                    elif prior_status == "OUTSIDE_DOCUMENT_SCOPE":
-                        st.caption("Mode: Document-aware conversation · Outside indexed-document scope")
-                    else:
-                        st.caption(f"Evidence: {prior_status} · Verified: {result.get('verification', {}).get('verified', False)}")
+                    st.caption(f"Evidence: {result.get('evidence_status')} · Verified: {result.get('verification', {}).get('verified', False)}")
                     with st.expander("Inspect sources and retrieval trace"):
                         st.json({"citations": result.get("citations"), "trace": result.get("trace"),
                                  "retrieved_evidence": result.get("retrieved_evidence")})
-        question = st.chat_input("Ask anything, or ask a question about your indexed documents...")
+        question = st.chat_input("Ask a question about your indexed technical documentation...")
         if question:
             st.session_state.chat.append({"role": "user", "content": question})
             with st.chat_message("user"):
@@ -1205,12 +1124,7 @@ def run_streamlit() -> None:
                         st.markdown(result["answer"])
                         status = result.get("evidence_status", "UNKNOWN")
                         verified = result.get("verification", {}).get("verified", False)
-                        if status == "GENERAL_CONVERSATION":
-                            st.caption("Mode: General conversation · No indexed documents are being used")
-                        elif status == "OUTSIDE_DOCUMENT_SCOPE":
-                            st.caption("Mode: Document-aware conversation · No matching document evidence found; answer is not document-verified")
-                        else:
-                            st.caption(f"Evidence: **{status}** · Grounding verified: **{'Yes' if verified else 'No / unavailable'}**")
+                        st.caption(f"Evidence: **{status}** · Grounding verified: **{'Yes' if verified else 'No / unavailable'}**")
                         if result.get("citations"):
                             with st.expander("Sources and evidence"):
                                 for source in result["citations"]:
@@ -1311,7 +1225,7 @@ def run_streamlit() -> None:
                     left.caption(f"{doc['source_type']} · {doc['chunk_count']} chunks · Updated {doc['updated_at'][:19]}")
                     with right:
                         if st.button("Delete", key=f"del_{doc['document_id']}"):
-                            deleted = requests.delete(f"{API_BASE_URL}/documents/{doc['document_id']}", timeout=30)
+                            deleted = api_delete(f"/documents/{doc['document_id']}")
                             if deleted.ok:
                                 st.success("Document removed.")
                                 st.rerun()
@@ -1366,3 +1280,4 @@ if __name__ == "__main__":
         print(export_feedback_csv())
     else:
         run_streamlit()
+
