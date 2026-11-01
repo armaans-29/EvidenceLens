@@ -1,0 +1,24 @@
+# EvidenceLens BACKEND dependencies (backend.py)
+
+# API server
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9      # required by FastAPI for file uploads / form data
+pydantic>=2.0                # schemas use Field(pattern=...), a Pydantic v2 feature
+
+# Configuration and HTTP
+python-dotenv>=1.0
+requests>=2.31
+
+# Document parsing
+pypdf>=4.0
+beautifulsoup4>=4.12
+
+# RAG workflow
+langgraph>=0.2
+langchain-core>=0.3
+langchain-groq>=0.2
+langchain-huggingface>=0.1
+langchain-chroma>=0.1
+chromadb>=0.5
+sentence-transformers>=2.7
