@@ -15,7 +15,10 @@
 
 </div>
 
-## Some glimpse of the User Interface, the smooth polished simple yet professional theme
+---
+<div align="center">
+  
+### Some glimpse of the User Interface, the smooth polished simple professional version
 <p align="center">
   <img src="images/1.png" width="32%">
   <img src="images/2.png" width="32%">
@@ -24,7 +27,7 @@
   <img src="images/5.png" width="32%">
   <img src="images/6.png" width="32%">
 </p>
-
+</div>
 ---
 
 ## Why EvidenceLens?
